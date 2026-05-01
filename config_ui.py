@@ -53,6 +53,20 @@ FIELDS = [
         "help": "Delay between right-click and download actions.",
     },
     {
+        "name": "WA_PRE_START_WAIT_MS",
+        "label": "Wait Before Start (ms)",
+        "default": "5000",
+        "kind": "int",
+        "help": "How long to wait after opening WhatsApp Chat before starting.",
+    },
+    {
+        "name": "WA_REVIEW_STARRED_WAIT_MS",
+        "label": "Review Starred Wait (ms)",
+        "default": "15000",
+        "kind": "int",
+        "help": "How long to wait on the starred messages review screen.",
+    },
+    {
         "name": "WA_POST_STOP_WAIT_MS",
         "label": "Wait Before Close (ms)",
         "default": "10000",
@@ -247,6 +261,12 @@ class ConfigApp(tk.Tk):
                     return None
                 if name == "WA_POST_STOP_WAIT_MS" and parsed < 0:
                     messagebox.showerror("Invalid value", "WA_POST_STOP_WAIT_MS must be >= 0.")
+                    return None
+                if name == "WA_PRE_START_WAIT_MS" and parsed < 0:
+                    messagebox.showerror("Invalid value", "WA_PRE_START_WAIT_MS must be >= 0.")
+                    return None
+                if name == "WA_REVIEW_STARRED_WAIT_MS" and parsed < 0:
+                    messagebox.showerror("Invalid value", "WA_REVIEW_STARRED_WAIT_MS must be >= 0.")
                     return None
 
                 raw_value = str(parsed)

@@ -125,6 +125,17 @@ post_stop_wait_ms = get_env_int(
     10_000,
     minimum=0,
 )
+pre_start_wait_ms = get_env_int(
+    ("WA_PRE_START_WAIT_MS", "PRE_START_WAIT_MS"),
+    5_000,
+    minimum=0,
+)
+
+review_starred_wait_ms = get_env_int(
+    ("WA_REVIEW_STARRED_WAIT_MS", "REVIEW_STARRED_WAIT_MS"),
+    15_000,
+    minimum=0,
+)
 
 
 def is_message_already_downloaded(base_dir: Path, message_id: str) -> bool:
@@ -218,12 +229,13 @@ async def open_chat_from_search(page, search_box_selector: str, target_chat: str
     )
 
 
-async def find_visible_starred_message(page):
-    """Return info about the first visible starred message, or None."""
+async def find_visible_starred_messages(page):
+    """Return info about all visible starred messages."""
     return await page.evaluate(
         """
 () => {
   const rows = Array.from(document.querySelectorAll('[data-testid^="conv-msg-"]'));
+  const starredMessages = [];
   for (const row of rows) {
     const starred = row.querySelector(
       [
@@ -235,43 +247,52 @@ async def find_visible_starred_message(page):
       ].join(',')
     );
 
-    if (!starred) {
-      continue;
+    if (starred) {
+      const dataId = row.getAttribute('data-id') || '';
+      const timeEl = row.querySelector('[data-testid="msg-meta"] span span');
+      const textEl = row.querySelector('[data-testid="selectable-text"], [data-testid*="caption"], .copyable-text');
+      starredMessages.push({
+        dataId,
+        time: (timeEl?.textContent || '').trim(),
+        text: (textEl?.textContent || '').trim().slice(0, 120)
+      });
     }
-
-    const dataId = row.getAttribute('data-id') || '';
-    const timeEl = row.querySelector('[data-testid="msg-meta"] span span');
-    const textEl = row.querySelector('[data-testid="selectable-text"], [data-testid*="caption"], .copyable-text');
-
-    return {
-      dataId,
-      time: (timeEl?.textContent || '').trim(),
-      text: (textEl?.textContent || '').trim().slice(0, 120)
-    };
   }
-  return null;
+  return starredMessages;
 }
         """
     )
 
 
-async def scroll_until_starred(page, max_rounds=500, no_progress_limit=10):
+async def scroll_until_penultimate_starred(page, max_rounds=500, no_progress_limit=10):
     """
-    Scroll message history from newest to oldest until a starred message is visible.
-    Returns a dict with stop reason and optional message info.
+    Scroll message history from newest to oldest until penultimate starred.
     """
     panel = page.locator('[data-testid="conversation-panel-messages"]')
     await panel.wait_for(timeout=30_000)
 
     no_progress_rounds = 0
+    # List to store starred messages in discovery order (Newest -> Oldest)
+    seen_starred = []
+    seen_ids = set()
 
     for i in range(1, max_rounds + 1):
-        starred = await find_visible_starred_message(page)
-        if starred:
+        found = await find_visible_starred_messages(page)
+        
+        for msg in found:
+            if msg["dataId"] not in seen_ids:
+                seen_ids.add(msg["dataId"])
+                seen_starred.append(msg)
+        
+        # Discovery order when scrolling UP is Newest -> Oldest.
+        # seen_starred[0] = Last Starred (most recent)
+        # seen_starred[1] = Penultimate Starred
+        if len(seen_starred) >= 2:
             return {
-                "reason": "starred_found",
+                "reason": "penultimate_found",
                 "round": i,
-                "message": starred,
+                "penultimate": seen_starred[1],
+                "last_starred": seen_starred[0],
             }
 
         older_hint_visible = await page.locator(
@@ -315,11 +336,13 @@ async def scroll_until_starred(page, max_rounds=500, no_progress_limit=10):
 async def right_click_next_undownloaded_after_starred(
     page,
     save_dir: Path,
+    start_after_id: str | None = None,
+    stop_at_id: str | None = None,
     starred_boundary_confirmed: bool = False,
 ):
     """
-    Find the first visible starred message, then right-click the next downloadable
-    message after it in DOM order that is not already downloaded.
+    Right-click the next downloadable message after start_after_id until stop_at_id
+    is reached (inclusive), that is not already downloaded.
     """
     panel = page.locator('[data-testid="conversation-panel-messages"]')
     await panel.wait_for(timeout=10_000)
@@ -335,7 +358,8 @@ async def right_click_next_undownloaded_after_starred(
     max_scan_rounds = 220
     max_no_progress_rounds = 14
     no_progress_rounds = 0
-    passed_starred_boundary = starred_boundary_confirmed
+    passed_start_boundary = starred_boundary_confirmed
+    hit_stop_boundary = False
     saw_any_candidates = False
     seen_candidate_ids = set()
     scan_round = 0
@@ -347,15 +371,9 @@ async def right_click_next_undownloaded_after_starred(
 
         scan_result = await page.evaluate(
             """
-() => {
+(args) => {
+    const { startAfterId, stopAtId } = args;
     const rows = Array.from(document.querySelectorAll('[data-testid^="conv-msg-"]'));
-    const isStarred = (row) => !!row.querySelector([
-        '[data-icon*="star"]',
-        '[aria-label*="star" i]',
-        '[aria-label*="starred" i]',
-        '[title*="star" i]',
-        '[data-testid*="star" i]'
-    ].join(','));
     const isDownloadable = (row) => !!row.querySelector([
         '[data-testid="document-thumb"]',
         '[data-testid="image-thumb"]',
@@ -386,38 +404,48 @@ async def right_click_next_undownloaded_after_starred(
         return !!outgoingHint;
     };
 
-    const starredIndex = rows.findIndex(isStarred);
-    const idsAfterStarred = [];
+    let passedStart = !startAfterId;
+    let reachedStop = false;
     const allDownloadableIds = [];
 
     for (let i = 0; i < rows.length; i++) {
-        if (!isDownloadable(rows[i])) continue;
         const id = rows[i].getAttribute('data-id');
         if (!id) continue;
-        if (isOutgoing(rows[i])) continue;
-        allDownloadableIds.push(id);
-        if (starredIndex >= 0 && i > starredIndex) {
-            idsAfterStarred.push(id);
+
+        if (id === startAfterId) {
+            passedStart = true;
+            continue; 
+        }
+
+        if (passedStart && !reachedStop) {
+            if (isDownloadable(rows[i]) && !isOutgoing(rows[i])) {
+                allDownloadableIds.push(id);
+            }
+        }
+
+        if (id === stopAtId) {
+            reachedStop = true;
+            break;
         }
     }
 
     return {
-        starredVisible: starredIndex >= 0,
-        idsAfterStarred,
+        passedStart,
+        reachedStop,
         allDownloadableIds,
     };
 }
-            """
+            """,
+            {"startAfterId": start_after_id, "stopAtId": stop_at_id}
         )
 
-        if scan_result.get("starredVisible"):
-            passed_starred_boundary = True
+        if scan_result.get("passedStart"):
+            passed_start_boundary = True
+        
+        if scan_result.get("reachedStop"):
+            hit_stop_boundary = True
 
-        candidate_ids = (
-            scan_result.get("idsAfterStarred", [])
-            if scan_result.get("starredVisible")
-            else (scan_result.get("allDownloadableIds", []) if passed_starred_boundary else [])
-        )
+        candidate_ids = scan_result.get("allDownloadableIds", [])
 
         if candidate_ids:
             saw_any_candidates = True
@@ -445,6 +473,10 @@ async def right_click_next_undownloaded_after_starred(
                 "reason": "ok",
                 "message_id": candidate_id,
             }
+
+        if hit_stop_boundary and not any(cid not in seen_candidate_ids for cid in candidate_ids):
+             # We processed all candidates in the visible range up to stop boundary.
+             break
 
         prev_top = await panel.evaluate("el => el.scrollTop")
         await panel.evaluate(
@@ -474,6 +506,9 @@ async def right_click_next_undownloaded_after_starred(
             "reason": "scan_round_limit_reached",
             "round": scan_round,
         }
+
+    if hit_stop_boundary:
+        return {"clicked": False, "reason": "reached_stop_boundary"}
 
     if saw_any_candidates:
         return {"clicked": False, "reason": "all_downloadables_already_downloaded"}
@@ -569,15 +604,19 @@ async def run():
         await open_chat_from_search(page, search_box_selector, chat_name)
 
         print(f"Chat '{chat_name}' found and opened!")
+        await page.wait_for_timeout(pre_start_wait_ms)
 
-        result = await scroll_until_starred(page)
-        if result["reason"] == "starred_found":
-            msg = result["message"]
+        result = await scroll_until_penultimate_starred(page)
+        if result["reason"] == "penultimate_found":
+            penultimate = result["penultimate"]
+            last_starred = result["last_starred"]
             print(
-                "Stopped: starred message found "
-                f"(round={result['round']}, data-id={msg.get('dataId', '')}, "
-                f"time={msg.get('time', '')}, text={msg.get('text', '')!r})"
+                "Stopped scrolling: reached penultimate starred message.\n"
+                f"  Penultimate: {penultimate.get('time', '')} - {penultimate.get('text', '')!r} (ID: {penultimate.get('dataId', '')})\n"
+                f"  Last Starred: {last_starred.get('time', '')} - {last_starred.get('text', '')!r} (ID: {last_starred.get('dataId', '')})"
             )
+
+            await page.wait_for_timeout(review_starred_wait_ms)
 
             downloaded_this_run = 0
             scan_limit_retries = 0
@@ -585,6 +624,8 @@ async def run():
                 click_result = await right_click_next_undownloaded_after_starred(
                     page,
                     downloads_dir,
+                    start_after_id=penultimate.get("dataId"),
+                    stop_at_id=last_starred.get("dataId"),
                     starred_boundary_confirmed=True,
                 )
                 if not click_result.get("clicked"):
