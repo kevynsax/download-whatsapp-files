@@ -5,7 +5,14 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+def get_app_root() -> Path:
+    # In frozen mode, __file__ may point inside a temp _MEI folder.
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+PROJECT_ROOT = get_app_root()
 ENV_FILE = PROJECT_ROOT / ".env"
 MAIN_SCRIPT = PROJECT_ROOT / "main.py"
 
@@ -84,6 +91,8 @@ def quote_env_value(value: str) -> str:
 
 
 def write_env_file(path: Path, values: dict[str, str]):
+    path.parent.mkdir(parents=True, exist_ok=True)
+
     lines = [
         "# WhatsApp downloader configuration",
         "# You can edit this file manually or with config_ui.py.",
@@ -252,6 +261,11 @@ class ConfigApp(tk.Tk):
             sibling_downloader = frozen_path.with_name("whatsapp_downloader.exe")
             if sibling_downloader.exists():
                 return [str(sibling_downloader)]
+            raise FileNotFoundError(
+                "Could not find whatsapp_downloader.exe next to "
+                f"{frozen_path.name}. Keep the full dist\\whatsapp_downloader "
+                "folder together on the target machine."
+            )
 
         return [sys.executable, str(MAIN_SCRIPT)]
 
@@ -268,6 +282,9 @@ class ConfigApp(tk.Tk):
 
         env = os.environ.copy()
         env.update(values)
+        if os.name == "nt":
+            # Keep the launched downloader console open so users can read errors.
+            env.setdefault("WA_KEEP_CONSOLE_OPEN", "1")
 
         creationflags = 0
         if os.name == "nt":

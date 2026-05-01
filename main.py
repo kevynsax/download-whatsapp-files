@@ -1,5 +1,7 @@
 import asyncio
 import os
+import sys
+import traceback
 from pathlib import Path
 from playwright.async_api import async_playwright
 
@@ -65,12 +67,53 @@ def get_env_int(names, default: int, minimum: int | None = None) -> int:
     return value
 
 
-project_dir = Path(__file__).resolve().parent
-load_env_file(project_dir / ".env")
+def get_app_root() -> Path:
+    """
+    Return the directory that should contain runtime config and data.
+
+    In PyInstaller frozen mode, __file__ points inside bundle internals
+    (or a temp _MEI folder for onefile). Using sys.executable keeps .env,
+    downloads and profile data next to the built executable.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def resolve_runtime_path(raw_path: str, base_dir: Path) -> Path:
+    path = Path(raw_path).expanduser()
+    if path.is_absolute():
+        return path
+    return (base_dir / path).resolve()
+
+
+def should_keep_console_open() -> bool:
+    value = os.getenv("WA_KEEP_CONSOLE_OPEN", "")
+    return value.strip().lower() in {"1", "true", "yes", "on", "y"}
+
+
+def maybe_pause_before_exit():
+    if os.name != "nt" or not should_keep_console_open():
+        return
+    try:
+        input("Press Enter to close this window...")
+    except EOFError:
+        pass
+
+
+app_root = get_app_root()
+env_file_path = app_root / ".env"
+load_env_file(env_file_path)
 
 chat_name = get_env_value(("WA_CHAT_NAME",), "61 9904-5559")
-user_data_dir = Path(get_env_value(("WA_USER_DATA_DIR",), "./wa_user_data"))
-downloads_dir = Path(get_env_value(("DOWNLOADS_DIR", "WA_DOWNLOADS_DIR"), "./downloads"))
+user_data_dir = resolve_runtime_path(
+    get_env_value(("WA_USER_DATA_DIR",), "./wa_user_data"),
+    app_root,
+)
+downloads_dir = resolve_runtime_path(
+    get_env_value(("DOWNLOADS_DIR", "WA_DOWNLOADS_DIR"), "./downloads"),
+    app_root,
+)
 max_downloads_per_execution = get_env_int(
     ("MAX_DOWNLOADS_PER_EXECUTION", "MAX_DOWNLOADS_PER_RUN"),
     100,
@@ -469,6 +512,10 @@ async def click_download_in_context_menu(page, save_dir: Path, message_id: str):
 
 async def run():
     async with async_playwright() as p:
+        print(f"Config file: {env_file_path}")
+        print(f"User data dir: {user_data_dir}")
+        print(f"Downloads dir: {downloads_dir}")
+
         user_data_dir.mkdir(parents=True, exist_ok=True)
         context = await p.chromium.launch_persistent_context(
             user_data_dir=str(user_data_dir.resolve()),
@@ -579,5 +626,22 @@ async def run():
 
         await page.wait_for_timeout(10_000)
         await context.close()
-        
-asyncio.run(run())
+
+
+def main() -> int:
+    try:
+        asyncio.run(run())
+        return 0
+    except KeyboardInterrupt:
+        print("Interrupted by user.")
+        return 130
+    except Exception:
+        print("Fatal error while running downloader:")
+        traceback.print_exc()
+        return 1
+    finally:
+        maybe_pause_before_exit()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

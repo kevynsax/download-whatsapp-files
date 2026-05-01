@@ -81,7 +81,10 @@ python3 main.py
 
 Use environment variables (or a local `.env` file) to avoid editing code every run.
 
-`main.py` loads `.env` automatically from the project root.
+Runtime loads `.env` from the app root:
+
+- Python/script mode: project root (same folder as `main.py`).
+- Frozen EXE mode: executable folder (for example `dist\whatsapp_downloader\.env`).
 
 - `WA_CHAT_NAME` (default: `61 9904-5559`)
 - `WA_USER_DATA_DIR` (default: `./wa_user_data`)
@@ -252,6 +255,12 @@ If you want to run on Windows without installing Python there, build an EXE.
 4. Run `dist\whatsapp_downloader\whatsapp_downloader_config.exe` to configure values in a GUI.
 5. Click **Run Downloader** in the GUI (or run `dist\whatsapp_downloader\whatsapp_downloader.exe` directly).
 
+Config location in EXE mode:
+
+- `whatsapp_downloader_config.exe` saves `.env` next to the EXE.
+- Seeing `_MEI...` in older builds was a PyInstaller temp-path side effect and is not the intended config location.
+- Keep the full `dist\whatsapp_downloader` folder together on the target machine.
+
 Target machine still needs:
 
 - Google Chrome installed.
@@ -262,3 +271,12 @@ Summary:
 
 - Python workflow: Python is required.
 - EXE workflow: Python is not required on the target machine.
+
+### Windows Troubleshooting
+
+If **Run Downloader** opens a terminal and it closes immediately:
+
+1. Run `whatsapp_downloader_config.exe` and click **Run Downloader** again (new builds keep the console open to show logs).
+2. Confirm `whatsapp_downloader.exe` is in the same folder as `whatsapp_downloader_config.exe`.
+3. Check that `.env` is in that same folder and has valid values.
+4. Make sure Google Chrome is installed on the target machine.
