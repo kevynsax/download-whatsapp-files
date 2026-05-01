@@ -165,22 +165,6 @@ save markers map
 close browser context
 ```
 
-## Data Model
-
-### Marker key
-
-```text
-sha256(name + phone + text + hour)
-```
-
-### Marker storage example (`state/markers.json`)
-
-```json
-{
-  "e3b0c44298fc1c149afbf4c8996fb924...": 1,
-  "43b2f6f9a1f4be28e17d34fdd8cf902a...": 1
-}
-```
 
 ## Selector Guidance (WhatsApp Web is dynamic)
 
