@@ -214,15 +214,15 @@ async def right_click_next_undownloaded_after_starred(
         '[aria-label*="download" i]'
     )
 
-    max_scan_rounds = 40
-    max_no_progress_rounds = 8
+    max_scan_rounds = 220
+    max_no_progress_rounds = 14
     no_progress_rounds = 0
-    no_new_candidate_rounds = 0
     passed_starred_boundary = starred_boundary_confirmed
     saw_any_candidates = False
     seen_candidate_ids = set()
+    scan_round = 0
 
-    for _ in range(max_scan_rounds):
+    for scan_round in range(1, max_scan_rounds + 1):
         row_count = await page.locator('[data-testid^="conv-msg-"]').count()
         if row_count == 0:
             return {"clicked": False, "reason": "no_visible_messages"}
@@ -246,6 +246,28 @@ async def right_click_next_undownloaded_after_starred(
         '[aria-label*="download" i]'
     ].join(','));
 
+    const isOutgoing = (row) => {
+        const rowClass = (row.getAttribute('class') || '').toLowerCase();
+        if (rowClass.includes('message-out') || rowClass.includes('msg-out') || rowClass.includes('outgoing')) {
+            return true;
+        }
+
+        const outgoingHint = row.querySelector([
+            '.message-out',
+            '[class*="message-out"]',
+            '[class*="msg-out"]',
+            '[data-testid*="msg-out" i]',
+            '[data-testid*="outgoing" i]',
+            '[aria-label*="you sent" i]',
+            '[data-icon="msg-check"]',
+            '[data-icon="msg-dblcheck"]',
+            '[data-icon*="msg-check" i]',
+            '[data-icon*="dblcheck" i]'
+        ].join(','));
+
+        return !!outgoingHint;
+    };
+
     const starredIndex = rows.findIndex(isStarred);
     const idsAfterStarred = [];
     const allDownloadableIds = [];
@@ -254,6 +276,7 @@ async def right_click_next_undownloaded_after_starred(
         if (!isDownloadable(rows[i])) continue;
         const id = rows[i].getAttribute('data-id');
         if (!id) continue;
+        if (isOutgoing(rows[i])) continue;
         allDownloadableIds.push(id);
         if (starredIndex >= 0 && i > starredIndex) {
             idsAfterStarred.push(id);
@@ -283,10 +306,7 @@ async def right_click_next_undownloaded_after_starred(
 
         new_candidate_ids = [cid for cid in candidate_ids if cid not in seen_candidate_ids]
         if new_candidate_ids:
-            no_new_candidate_rounds = 0
             seen_candidate_ids.update(new_candidate_ids)
-        elif candidate_ids:
-            no_new_candidate_rounds += 1
 
         for candidate_id in candidate_ids:
             if is_message_already_downloaded(save_dir, candidate_id):
@@ -330,8 +350,12 @@ async def right_click_next_undownloaded_after_starred(
         if no_progress_rounds >= max_no_progress_rounds:
             break
 
-        if no_new_candidate_rounds >= 6:
-            break
+    if scan_round >= max_scan_rounds and no_progress_rounds < max_no_progress_rounds:
+        return {
+            "clicked": False,
+            "reason": "scan_round_limit_reached",
+            "round": scan_round,
+        }
 
     if saw_any_candidates:
         return {"clicked": False, "reason": "all_downloadables_already_downloaded"}
@@ -423,6 +447,7 @@ async def run():
             )
 
             downloaded_this_run = 0
+            scan_limit_retries = 0
             while downloaded_this_run < max_downloads_per_execution:
                 click_result = await right_click_next_undownloaded_after_starred(
                     page,
@@ -430,9 +455,20 @@ async def run():
                     starred_boundary_confirmed=True,
                 )
                 if not click_result.get("clicked"):
+                    reason = click_result.get("reason")
+                    if reason == "scan_round_limit_reached" and scan_limit_retries < 5:
+                        scan_limit_retries += 1
+                        print(
+                            "Continuing scan after round limit "
+                            f"(retry={scan_limit_retries}, round={click_result.get('round')}, "
+                            f"downloaded={downloaded_this_run})."
+                        )
+                        await page.wait_for_timeout(250)
+                        continue
+
                     print(
                         "Stopping download loop "
-                        f"(reason={click_result.get('reason')}, downloaded={downloaded_this_run})."
+                        f"(reason={reason}, downloaded={downloaded_this_run})."
                     )
                     break
 
@@ -450,6 +486,7 @@ async def run():
                 )
                 if download_click.get("clicked"):
                     downloaded_this_run += 1
+                    scan_limit_retries = 0
                     print(
                         "Downloaded file successfully "
                         f"(count={downloaded_this_run}, message_id={click_result.get('message_id', '')}, "
