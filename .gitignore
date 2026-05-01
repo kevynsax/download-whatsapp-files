@@ -1,0 +1,31 @@
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local runtime data
+downloads/
+wa_user_data/
+state/
+
+# Environment and local settings
+.env
+.env.*
+*.local
+
+# OS/editor noise
+.DS_Store
+.vscode/
+.idea/
