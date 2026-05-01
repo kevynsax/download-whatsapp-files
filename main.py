@@ -194,7 +194,11 @@ async def scroll_until_starred(page, max_rounds=500, no_progress_limit=10):
     }
 
 
-async def right_click_next_undownloaded_after_starred(page, save_dir: Path):
+async def right_click_next_undownloaded_after_starred(
+    page,
+    save_dir: Path,
+    starred_boundary_confirmed: bool = False,
+):
     """
     Find the first visible starred message, then right-click the next downloadable
     message after it in DOM order that is not already downloaded.
@@ -213,8 +217,10 @@ async def right_click_next_undownloaded_after_starred(page, save_dir: Path):
     max_scan_rounds = 40
     max_no_progress_rounds = 8
     no_progress_rounds = 0
-    passed_starred_boundary = False
+    no_new_candidate_rounds = 0
+    passed_starred_boundary = starred_boundary_confirmed
     saw_any_candidates = False
+    seen_candidate_ids = set()
 
     for _ in range(max_scan_rounds):
         row_count = await page.locator('[data-testid^="conv-msg-"]').count()
@@ -275,6 +281,13 @@ async def right_click_next_undownloaded_after_starred(page, save_dir: Path):
         if candidate_ids:
             saw_any_candidates = True
 
+        new_candidate_ids = [cid for cid in candidate_ids if cid not in seen_candidate_ids]
+        if new_candidate_ids:
+            no_new_candidate_rounds = 0
+            seen_candidate_ids.update(new_candidate_ids)
+        elif candidate_ids:
+            no_new_candidate_rounds += 1
+
         for candidate_id in candidate_ids:
             if is_message_already_downloaded(save_dir, candidate_id):
                 continue
@@ -297,7 +310,7 @@ async def right_click_next_undownloaded_after_starred(page, save_dir: Path):
 
         prev_top = await panel.evaluate("el => el.scrollTop")
         await panel.evaluate(
-            "el => el.scrollBy(0, Math.max(700, Math.floor(el.clientHeight * 0.9)))"
+            "el => el.scrollBy(0, Math.max(320, Math.floor(el.clientHeight * 0.45)))"
         )
         await page.wait_for_timeout(300)
         new_top = await panel.evaluate("el => el.scrollTop")
@@ -315,6 +328,9 @@ async def right_click_next_undownloaded_after_starred(page, save_dir: Path):
             no_progress_rounds = 0
 
         if no_progress_rounds >= max_no_progress_rounds:
+            break
+
+        if no_new_candidate_rounds >= 6:
             break
 
     if saw_any_candidates:
@@ -408,7 +424,11 @@ async def run():
 
             downloaded_this_run = 0
             while downloaded_this_run < max_downloads_per_execution:
-                click_result = await right_click_next_undownloaded_after_starred(page, downloads_dir)
+                click_result = await right_click_next_undownloaded_after_starred(
+                    page,
+                    downloads_dir,
+                    starred_boundary_confirmed=True,
+                )
                 if not click_result.get("clicked"):
                     print(
                         "Stopping download loop "
