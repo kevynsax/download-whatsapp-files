@@ -23,6 +23,7 @@ state/
 # Environment and local settings
 .env
 .env.*
+!.env.example
 *.local
 
 # OS/editor noise

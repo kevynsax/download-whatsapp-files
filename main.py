@@ -1,12 +1,82 @@
 import asyncio
+import os
 from pathlib import Path
 from playwright.async_api import async_playwright
 
-chat_name = "61 9904-5559"
-user_data_dir = Path("./wa_user_data")
-downloads_dir = Path("./downloads")
-max_downloads_per_execution = 100
-click_wait_ms = 1000
+
+def load_env_file(env_path: Path):
+    """Load simple KEY=VALUE pairs from a .env file without extra dependencies."""
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+
+        if "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+            value = value[1:-1]
+            value = value.replace('\\"', '"').replace('\\\\', '\\')
+
+        # Keep explicit process env vars as highest priority.
+        os.environ.setdefault(key, value)
+
+
+def get_env_value(names, default: str) -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value is not None and value.strip() != "":
+            return value
+    return default
+
+
+def get_env_int(names, default: int, minimum: int | None = None) -> int:
+    raw = get_env_value(names, "")
+    if raw == "":
+        return default
+
+    try:
+        value = int(raw)
+    except ValueError:
+        first_name = names[0] if names else "ENV_INT"
+        print(f"Invalid integer for {first_name}: {raw!r}; using default {default}.")
+        return default
+
+    if minimum is not None and value < minimum:
+        first_name = names[0] if names else "ENV_INT"
+        print(
+            f"Value for {first_name} must be >= {minimum}; "
+            f"got {value}. Using default {default}."
+        )
+        return default
+
+    return value
+
+
+project_dir = Path(__file__).resolve().parent
+load_env_file(project_dir / ".env")
+
+chat_name = get_env_value(("WA_CHAT_NAME",), "61 9904-5559")
+user_data_dir = Path(get_env_value(("WA_USER_DATA_DIR",), "./wa_user_data"))
+downloads_dir = Path(get_env_value(("DOWNLOADS_DIR", "WA_DOWNLOADS_DIR"), "./downloads"))
+max_downloads_per_execution = get_env_int(
+    ("MAX_DOWNLOADS_PER_EXECUTION", "MAX_DOWNLOADS_PER_RUN"),
+    100,
+    minimum=1,
+)
+click_wait_ms = get_env_int(("CLICK_WAIT_MS", "WA_CLICK_WAIT_MS"), 1000, minimum=0)
 
 
 def is_message_already_downloaded(base_dir: Path, message_id: str) -> bool:
@@ -44,7 +114,7 @@ def build_download_save_path(base_dir: Path, message_id: str, suggested_name: st
 async def open_chat_from_search(page, search_box_selector: str, target_chat: str):
     search_box = page.locator(search_box_selector).first
     await search_box.click()
-    await page.keyboard.press("Meta+A")
+    await page.keyboard.press("ControlOrMeta+A")
     await page.keyboard.press("Backspace")
     await search_box.fill(target_chat)
     await page.wait_for_timeout(500)

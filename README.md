@@ -79,13 +79,31 @@ python3 main.py
 
 ## Recommended Runtime Config
 
-Use environment variables to avoid editing code every run:
+Use environment variables (or a local `.env` file) to avoid editing code every run.
 
-- `WA_CHAT_NAME` (default: `CrossManual 🤖`)
-- `MAX_DOWNLOADS_PER_RUN` (example: `50`)
-- `MAX_NO_MARKER_SCAN` (default: `200`)
+`main.py` loads `.env` automatically from the project root.
+
+- `WA_CHAT_NAME` (default: `61 9904-5559`)
+- `WA_USER_DATA_DIR` (default: `./wa_user_data`)
 - `DOWNLOADS_DIR` (default: `./downloads`)
-- `MARKERS_FILE` (default: `./state/markers.json`)
+- `MAX_DOWNLOADS_PER_EXECUTION` (default: `100`)
+- `CLICK_WAIT_MS` (default: `1000`)
+
+Backward compatibility:
+
+- `MAX_DOWNLOADS_PER_RUN` is also accepted as an alias for `MAX_DOWNLOADS_PER_EXECUTION`.
+
+Example `.env` template is available in `.env.example`.
+
+## Windows Config UI (User Friendly)
+
+If you do not want to edit `.env` manually, use the built-in GUI:
+
+1. On Windows, double-click `run_config_ui_windows.bat`.
+2. Fill in the fields.
+3. Click **Save .env** or **Run Downloader**.
+
+The UI script is `config_ui.py`.
 
 ## Core Algorithm (Pseudo-code)
 
@@ -213,3 +231,50 @@ Log one line per processed candidate:
 - This automation interacts with personal chat data.
 - Keep `wa_user_data/`, `downloads/`, and `state/` private.
 - Do not commit chat content, cookies, or profile folders to git.
+
+## Windows Deployment
+
+You have two good options on Windows.
+
+### Option A - Run with Python (easiest)
+
+Use this if you are fine installing Python on the Windows computer.
+
+1. Install Google Chrome.
+2. Install Python 3.10+ from python.org (enable "Add Python to PATH").
+3. Open the project folder.
+4. Recommended: run `run_config_ui_windows.bat` and launch from the UI.
+5. Or open PowerShell in the project folder and run:
+
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python main.py
+```
+
+Notes:
+
+- This project launches the installed Chrome channel, so you usually do not need `playwright install chromium`.
+- First run will require WhatsApp QR login.
+
+### Option B - Executable (no Python on target machine)
+
+If you want to run on Windows without installing Python there, build an EXE.
+
+1. Build on a Windows machine (PyInstaller does not produce a Windows EXE from macOS).
+2. In the project root, run `build_windows_exe.bat`.
+3. After build, copy the whole folder `dist\whatsapp_downloader` to the target Windows computer.
+4. Run `dist\whatsapp_downloader\whatsapp_downloader_config.exe` to configure values in a GUI.
+5. Click **Run Downloader** in the GUI (or run `dist\whatsapp_downloader\whatsapp_downloader.exe` directly).
+
+Target machine still needs:
+
+- Google Chrome installed.
+- Internet access to WhatsApp Web.
+- Write permission in the app folder (for `downloads/` and `wa_user_data/`).
+
+Summary:
+
+- Python workflow: Python is required.
+- EXE workflow: Python is not required on the target machine.
