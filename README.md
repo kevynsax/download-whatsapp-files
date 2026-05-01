@@ -91,6 +91,7 @@ Runtime loads `.env` from the app root:
 - `DOWNLOADS_DIR` (default: `./downloads`)
 - `MAX_DOWNLOADS_PER_EXECUTION` (default: `100`)
 - `CLICK_WAIT_MS` (default: `1000`)
+- `WA_POST_STOP_WAIT_MS` (default: `10000`)
 
 Backward compatibility:
 

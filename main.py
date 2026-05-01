@@ -120,6 +120,11 @@ max_downloads_per_execution = get_env_int(
     minimum=1,
 )
 click_wait_ms = get_env_int(("CLICK_WAIT_MS", "WA_CLICK_WAIT_MS"), 1000, minimum=0)
+post_stop_wait_ms = get_env_int(
+    ("WA_POST_STOP_WAIT_MS", "POST_STOP_WAIT_MS"),
+    10_000,
+    minimum=0,
+)
 
 
 def is_message_already_downloaded(base_dir: Path, message_id: str) -> bool:
@@ -517,12 +522,17 @@ async def run():
         print(f"Downloads dir: {downloads_dir}")
 
         user_data_dir.mkdir(parents=True, exist_ok=True)
+        launch_args = [
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-features=DownloadBubble,DownloadBubbleV2",
+        ]
         context = await p.chromium.launch_persistent_context(
             user_data_dir=str(user_data_dir.resolve()),
             channel="chrome",
             headless=False,
             accept_downloads=True,
-            args=["--no-first-run", "--no-default-browser-check"]
+            args=launch_args,
         )
         page = context.pages[0] if context.pages else await context.new_page()
 
@@ -548,6 +558,12 @@ async def run():
             print("Whatsapp Web loaded successfully!")
         except Exception:
             print("Login timed out Did you scan the QR code?")
+            if post_stop_wait_ms > 0:
+                print(
+                    "Waiting before close "
+                    f"({post_stop_wait_ms} ms)."
+                )
+                await page.wait_for_timeout(post_stop_wait_ms)
             return
 
         await open_chat_from_search(page, search_box_selector, chat_name)
@@ -624,7 +640,12 @@ async def run():
             if result.get("older_messages_hint_visible"):
                 print("WhatsApp is showing 'older messages from your phone' in this chat.")
 
-        await page.wait_for_timeout(10_000)
+        if post_stop_wait_ms > 0:
+            print(
+                "Waiting before close "
+                f"({post_stop_wait_ms} ms)."
+            )
+            await page.wait_for_timeout(post_stop_wait_ms)
         await context.close()
 
 

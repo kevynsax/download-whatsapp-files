@@ -52,6 +52,13 @@ FIELDS = [
         "kind": "int",
         "help": "Delay between right-click and download actions.",
     },
+    {
+        "name": "WA_POST_STOP_WAIT_MS",
+        "label": "Wait Before Close (ms)",
+        "default": "10000",
+        "kind": "int",
+        "help": "How long to keep the app open after stopping.",
+    },
 ]
 
 
@@ -134,9 +141,9 @@ class ConfigApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("WhatsApp Downloader Config")
-        self.geometry("900x370")
-        self.minsize(900, 370)
-        self.maxsize(900, 370)
+        self.geometry("900x420")
+        self.minsize(900, 420)
+        self.maxsize(900, 420)
 
         self.values = get_default_values()
         self.variables: dict[str, tk.StringVar] = {}
@@ -237,6 +244,9 @@ class ConfigApp(tk.Tk):
                     return None
                 if name == "CLICK_WAIT_MS" and parsed < 0:
                     messagebox.showerror("Invalid value", "CLICK_WAIT_MS must be >= 0.")
+                    return None
+                if name == "WA_POST_STOP_WAIT_MS" and parsed < 0:
+                    messagebox.showerror("Invalid value", "WA_POST_STOP_WAIT_MS must be >= 0.")
                     return None
 
                 raw_value = str(parsed)
