@@ -372,7 +372,7 @@ async def right_click_next_undownloaded_after_starred(
         scan_result = await page.evaluate(
             """
 (args) => {
-    const { startAfterId, stopAtId } = args;
+    const { startAfterId, stopAtId, boundaryConfirmed } = args;
     const rows = Array.from(document.querySelectorAll('[data-testid^="conv-msg-"]'));
     const isDownloadable = (row) => !!row.querySelector([
         '[data-testid="document-thumb"]',
@@ -404,7 +404,10 @@ async def right_click_next_undownloaded_after_starred(
         return !!outgoingHint;
     };
 
-    let passedStart = !startAfterId;
+    // When boundaryConfirmed=true the start marker may have been virtualized out
+    // of the DOM (WhatsApp Web evicts older nodes as you scroll down). Treat all
+    // visible messages as already past the start boundary in that case.
+    let passedStart = !startAfterId || boundaryConfirmed;
     let reachedStop = false;
     const allDownloadableIds = [];
 
@@ -436,7 +439,7 @@ async def right_click_next_undownloaded_after_starred(
     };
 }
             """,
-            {"startAfterId": start_after_id, "stopAtId": stop_at_id}
+            {"startAfterId": start_after_id, "stopAtId": stop_at_id, "boundaryConfirmed": passed_start_boundary}
         )
 
         if scan_result.get("passedStart"):
